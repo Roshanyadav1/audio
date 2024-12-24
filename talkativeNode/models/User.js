@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema(
     { collection: 'users' } // Make sure this model is linked to the 'users' collection
   );
   
+  
   // Create a Mongoose model based on the schema
   const User = mongoose.model('User', userSchema);
   
