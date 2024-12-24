@@ -16,16 +16,11 @@ const server = http.createServer(app);
 
 app.use(cors()); // Express CORS middleware
 
-
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-];
-
+ 
 // Socket.io CORS configuration
 const io = socketIo(server, {
   cors: {
-    origin: allowedOrigins,// Allow the frontend to connect from this origin
+    origin: '*',// Allow the frontend to connect from this origin
     methods: ['GET', 'POST'], // Allow these HTTP methods
     allowedHeaders: ['Content-Type'], // Specify allowed headers
     credentials: true, // Allow credentials (cookies, authentication)
