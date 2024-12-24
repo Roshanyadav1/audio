@@ -14,6 +14,9 @@ const app = express();
 const server = http.createServer(app);
 
 
+app.use(cors()); // Express CORS middleware
+
+
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
@@ -28,11 +31,6 @@ const io = socketIo(server, {
     credentials: true, // Allow credentials (cookies, authentication)
   },
 });
-
-app.use(cors()); // Express CORS middleware
-
-// Serve static files for front-end (optional, if you want to serve HTML pages)
-app.use(express.static('public'));
 
 const mongoURI = process.env.MONGO_URI
 connection(mongoURI);
