@@ -14,10 +14,10 @@ const app = express();
 const server = http.createServer(app);
 
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-];
+// const allowedOrigins = [
+//   'http://localhost:3000',
+//   'http://localhost:3001',
+// ];
 
 // Socket.io CORS configuration
 // const io = socketIo(server, {
@@ -40,17 +40,17 @@ connection(mongoURI);
 // const activeConnections = new Map();
 // const activeRooms = new Map();
 
-const updateUserStatus = async (email, status) => {
-  try {
-    await User.findOneAndUpdate(
-      { email },
-      { $set: { status, lastActive: new Date() } },
-      { new: true }
-    );
-  } catch (error) {
-    console.error('Error updating user status:', error);
-  }
-};
+// const updateUserStatus = async (email, status) => {
+//   try {
+//     await User.findOneAndUpdate(
+//       { email },
+//       { $set: { status, lastActive: new Date() } },
+//       { new: true }
+//     );
+//   } catch (error) {
+//     console.error('Error updating user status:', error);
+//   }
+// };
 
 // io.on('connection', (socket) => {
 //   console.log('User connected:', socket.id);
@@ -196,7 +196,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-const PORT = process.env.PORT || 8000;
+const PORT = 8000;
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
