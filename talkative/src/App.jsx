@@ -1,23 +1,17 @@
- 
-import { useState } from 'react';
-import AudioCall from './AudioCall';
- 
-const App = () => {
-const [email , setEmail ] = useState('')
-const [show , setShow ] = useState(false)
-  
+import { Routes, Route } from "react-router-dom";
+import "./App.css";
+import LobbyScreen from "./screens/Lobby";
+import RoomPage from "./screens/Room";
+
+function App() {
   return (
-    <div className=' flex h-full  w-[100wh]'>
-      <div>
-       <input type='email' onChange={(e)=>setEmail(e.target.value)} />
-      <button onClick={()=>{
-        localStorage.setItem('email' , email)
-        setShow(true)
-      }}>Save email</button>
-      { show ?  <AudioCall email={email}/> : null }
-      </div>
+    <div className="App">
+      <Routes>
+        <Route path="/" element={<LobbyScreen />} />
+        <Route path="/room/:roomId" element={<RoomPage />} />
+      </Routes>
     </div>
   );
-};
+}
 
 export default App;
