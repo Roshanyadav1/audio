@@ -5,6 +5,8 @@ const http = require("http");
 const app = express();
 app.use(express.json());
 
+const port = process.env.PORT || 4000;
+
 // Create HTTP server and integrate with Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -55,7 +57,6 @@ io.on("connection", (socket) => {
 });
 
 // Start the server
-const PORT = 8000;
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+server.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
