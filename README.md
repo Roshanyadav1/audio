@@ -146,21 +146,11 @@ The implementation prioritizes accessibility through:
 5. **Color Contrast**: Meeting WCAG AA standards for text visibility
 6. **Screen Reader Support**: Alt text for images and appropriate aria-labels
 
-## 🧪 Testing
-
-The implementation includes:
-
-1. **Unit Testing**: Testing individual components with React Testing Library
-2. **Integration Testing**: Testing component interactions
-3. **Accessibility Testing**: Verifying WCAG compliance
-
 ## 📚 Third-Party Libraries
 
 The following libraries were used in the implementation:
 
-1. **Axios**: For API requests with better error handling
-2. **React Hook Form**: For efficient form handling and validation
-3. **clsx**: For conditional class name construction
+1. **clsx**: For conditional class name construction
 
 ## 🤔 Assumptions and Decisions
 
@@ -175,11 +165,8 @@ During implementation, the following assumptions were made:
 
 ### Challenge 1: Complex Layout Requirements
 **Solution**: Utilized a combination of Flexbox and CSS Grid to achieve complex layouts that remain responsive across all device sizes.
-
-### Challenge 2: Responsive Image Management
-**Solution**: Created an abstracted image component that handles various breakpoints with appropriate image sizes and formats.
-
-### Challenge 3: Performance on Mobile Devices
+ 
+### Challenge 2: Performance on Mobile Devices
 **Solution**: Implemented progressive enhancement for mobile users, deferring non-critical JavaScript and optimizing painting performance.
 
 ## 🔮 Future Improvements
