@@ -2,6 +2,8 @@
 
 This repository contains the frontend implementation of the Supreme Group website, developed as part of a technical assessment. The project focuses on building a performant and maintainable frontend based on a provided design.
 
+Live : https://supreme-group-assesment.vercel.app/
+
 ## 📝 Project Overview
 
 This implementation follows modern frontend development practices to create a responsive, accessible, and performant website for Supreme Group. The project closely adheres to the provided Figma design specifications with attention to pixel-perfect implementation across devices.
@@ -192,7 +194,7 @@ Given more time, the following improvements could be implemented:
 
 ## 🌐 Live Demo
 
-The project is deployed at: [https://supreme-group-frontend.vercel.app](https://supreme-group-frontend.vercel.app)
+The project is deployed at: [https://supreme-group-assesment.vercel.app/]
 
 ## 📋 Additional Information
 
