@@ -41,7 +41,7 @@ const LobbyScreen = () => {
         <form onSubmit={handleSubmitForm} className="space-y-6">
           {/* Email Field */}
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="email" className="block text-start text-sm font-medium text-gray-700 mb-1">
               Email Address
             </label>
             <input
@@ -57,7 +57,7 @@ const LobbyScreen = () => {
 
           {/* Room Field */}
           <div>
-            <label htmlFor="room" className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="room" className="block text-start text-sm font-medium text-gray-700 mb-1">
               Room ID
             </label>
             <input
