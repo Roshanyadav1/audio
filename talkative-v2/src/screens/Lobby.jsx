@@ -32,17 +32,31 @@ const LobbyScreen = () => {
   }, [socket, handleJoinRoom]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-tr from-indigo-100 via-white to-blue-100 flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 md:p-10">
-        <h2 className="text-2xl md:text-3xl font-semibold text-center text-indigo-700 mb-8">
-          Join a Video Chat Room
-        </h2>
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
+      {/* Glow blob */}
+      <div className="absolute w-96 h-96 bg-indigo-600 rounded-full blur-3xl opacity-10 pointer-events-none" />
 
-        <form onSubmit={handleSubmitForm} className="space-y-6">
-          {/* Email Field */}
+      <div className="relative w-full max-w-md bg-gray-900 border border-gray-800 rounded-3xl shadow-2xl p-8 md:p-10">
+
+        {/* Logo / Icon */}
+        <div className="flex justify-center mb-6">
+          <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-3xl shadow-lg">
+            📹
+          </div>
+        </div>
+
+        <h1 className="text-2xl md:text-3xl font-bold text-center text-white mb-1">
+          Talkative
+        </h1>
+        <p className="text-center text-gray-400 text-sm mb-8">
+          Enter a room ID to start or join a video call
+        </p>
+
+        <form onSubmit={handleSubmitForm} className="space-y-5">
+          {/* Email */}
           <div>
-            <label htmlFor="email" className="block text-start text-sm font-medium text-gray-700 mb-1">
-              Email Address
+            <label htmlFor="email" className="block text-sm font-medium text-gray-400 mb-1">
+              Your Email
             </label>
             <input
               type="email"
@@ -51,13 +65,13 @@ const LobbyScreen = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 text-white placeholder-gray-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
             />
           </div>
 
-          {/* Room Field */}
+          {/* Room ID */}
           <div>
-            <label htmlFor="room" className="block text-start text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="room" className="block text-sm font-medium text-gray-400 mb-1">
               Room ID
             </label>
             <input
@@ -66,23 +80,21 @@ const LobbyScreen = () => {
               required
               value={room}
               onChange={(e) => setRoom(e.target.value)}
-              placeholder="Enter room ID"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              placeholder="e.g. my-room-123"
+              className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 text-white placeholder-gray-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
             />
           </div>
 
-          {/* Submit Button */}
           <button
             type="submit"
-            className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition duration-200"
+            className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition text-sm tracking-wide shadow-md"
           >
-            Join Room
+            Join Room →
           </button>
         </form>
 
-        {/* Footer */}
-        <p className="text-center text-xs text-gray-400 mt-6">
-          Built with React • Socket.IO • WebRTC
+        <p className="text-center text-xs text-gray-600 mt-8">
+          React • Socket.IO • WebRTC
         </p>
       </div>
     </div>
