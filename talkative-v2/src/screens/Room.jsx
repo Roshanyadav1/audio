@@ -20,40 +20,27 @@ const RoomPage = () => {
 
   const myStreamRef = useRef(null);
   const remoteSocketIdRef = useRef(null);
-  // Accumulate remote tracks into a single MediaStream
-  const remoteMediaStream = useRef(new MediaStream());
 
-  // ── On mount: reset peer, attach core listeners ───────────────────────────
+  // ── On mount: fresh peer + track listener ───────────────────────────────
   useEffect(() => {
     peer.resetPeer();
 
-    // FIX 2: Accumulate tracks robustly into a MediaStream
-    const handleTrack = (ev) => {
-      const stream = ev.streams?.[0];
-      if (stream) {
-        setRemoteStream(stream);
-      } else {
-        // ev.streams can be empty — manually add track
-        remoteMediaStream.current.addTrack(ev.track);
-        setRemoteStream(remoteMediaStream.current);
+    // Listen for remote tracks
+    peer.peer.addEventListener("track", (ev) => {
+      if (ev.streams && ev.streams[0]) {
+        setRemoteStream(ev.streams[0]);
+        setCallStatus("connected");
       }
-      setCallStatus("connected");
-    };
+    });
 
-    peer.peer.addEventListener("track", handleTrack);
-
-    // ICE candidate → relay through server
+    // ICE candidates → relay
     peer.onIceCandidate((candidate) => {
       if (remoteSocketIdRef.current) {
-        socket.emit("ice:candidate", {
-          to: remoteSocketIdRef.current,
-          candidate,
-        });
+        socket.emit("ice:candidate", { to: remoteSocketIdRef.current, candidate });
       }
     });
 
     return () => {
-      peer.peer.removeEventListener("track", handleTrack);
       if (myStreamRef.current) {
         myStreamRef.current.getTracks().forEach((t) => t.stop());
       }
@@ -62,27 +49,23 @@ const RoomPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync ref with state
   useEffect(() => {
     remoteSocketIdRef.current = remoteSocketId;
   }, [remoteSocketId]);
 
-  // ── FIX 4: Auto-rejoin room on socket reconnect (handles page refresh) ────
+  // ── Auto-rejoin on page refresh ──────────────────────────────────────────
   useEffect(() => {
     const handleReconnect = () => {
       const email = sessionStorage.getItem("talkative_email");
       if (email && roomId) {
-        console.log("Reconnecting to room:", roomId, "as", email);
         socket.emit("room:join", { email, room: roomId });
       }
     };
     socket.on("connect", handleReconnect);
-    return () => {
-      socket.off("connect", handleReconnect);
-    };
+    return () => socket.off("connect", handleReconnect);
   }, [socket, roomId]);
 
-  // ── Get local media ───────────────────────────────────────────────────────
+  // ── Get local camera/mic ─────────────────────────────────────────────────
   const getLocalStream = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -93,91 +76,94 @@ const RoomPage = () => {
       setMyStream(stream);
       return stream;
     } catch (err) {
-      console.error("Could not get media:", err);
+      console.error("Media error:", err);
       alert("Camera/Microphone access is required.");
       return null;
     }
   }, []);
 
-  // ── Add local tracks to peer (guard against duplicates) ───────────────────
+  // ── Add local tracks to peer (no duplicate tracks) ───────────────────────
+  // Called AFTER offer/answer — this is what triggers renegotiation
   const sendStreams = useCallback((stream) => {
     const src = stream || myStreamRef.current;
     if (!src) return;
     const senders = peer.peer.getSenders();
     src.getTracks().forEach((track) => {
-      const alreadyAdded = senders.find((s) => s.track === track);
-      if (!alreadyAdded) {
+      const alreadySent = senders.find((s) => s.track === track);
+      if (!alreadySent) {
         peer.peer.addTrack(track, src);
       }
     });
   }, []);
 
-  // ── Another user joined the room ─────────────────────────────────────────
+  // ── Someone else joined ──────────────────────────────────────────────────
   const handleUserJoined = useCallback(({ email, id }) => {
     console.log(`${email} joined the room`);
     setRemoteSocketId(id);
     setRemoteEmail(email);
   }, []);
 
-  // ── Initiate call ────────────────────────────────────────────────────────
+  // ── Initiate call: getOffer WITHOUT adding tracks yet ───────────────────
+  // Tracks are added in handleCallAccepted → triggers renegotiation properly
   const handleCallUser = useCallback(async () => {
     const stream = await getLocalStream();
     if (!stream) return;
-    sendStreams(stream);           // Add tracks before offer → SDP has sendrecv
-    const offer = await peer.getOffer();
+    const offer = await peer.getOffer(); // no tracks added yet, intentional
     socket.emit("user:call", { to: remoteSocketIdRef.current, offer });
     setCallStatus("calling");
-  }, [socket, getLocalStream, sendStreams]);
+  }, [socket, getLocalStream]);
 
-  // ── FIX 1: Receive incoming call — store it, show Answer UI (don't auto-answer)
-  const handleIncommingCall = useCallback(
-    async ({ from, offer }) => {
-      setRemoteSocketId(from);
-      setIncomingCall({ from, offer }); // Show Answer button to user
-    },
-    []
-  );
+  // ── Incoming call: show modal, don't auto-answer ─────────────────────────
+  const handleIncommingCall = useCallback(({ from, offer }) => {
+    setRemoteSocketId(from);
+    setIncomingCall({ from, offer });
+  }, []);
 
-  // ── Answer the stored incoming call ─────────────
+  // ── User clicks Answer ────────────────────────────────────────────────────
   const handleAnswerCall = useCallback(async () => {
     if (!incomingCall) return;
     const { from, offer } = incomingCall;
     setIncomingCall(null);
     const stream = await getLocalStream();
     if (!stream) return;
-    sendStreams(stream);                        // ← tracks added BEFORE answer
-    const ans = await peer.getAnswer(offer);
+    const ans = await peer.getAnswer(offer); // no tracks yet, same as caller
     socket.emit("call:accepted", { to: from, ans });
-    setCallStatus("connected");
+    // Add tracks AFTER answer → triggers renegotiation → remote video flows
+    sendStreams(stream);
   }, [incomingCall, socket, getLocalStream, sendStreams]);
 
   const handleDeclineCall = useCallback(() => {
     setIncomingCall(null);
     setRemoteSocketId(null);
+    setRemoteEmail(null);
   }, []);
 
-  // ── Call accepted ─────────────────────────────────────────────────────────
-  const handleCallAccepted = useCallback(async ({ ans }) => {
-    await peer.setRemoteDescription(ans);
-    console.log("Call accepted!");
-    setCallStatus("connected");
-  }, []);
+  // ── Caller receives answer: set remote desc + send own tracks ────────────
+  const handleCallAccepted = useCallback(
+    async ({ ans }) => {
+      try {
+        await peer.setRemoteDescription(ans);
+        console.log("Call Accepted!");
+        // Add tracks NOW — this triggers negotiationneeded → renegotiation
+        sendStreams();
+        setCallStatus("connected");
+      } catch (err) {
+        console.error("handleCallAccepted error:", err);
+      }
+    },
+    [sendStreams]
+  );
 
-  // ── FIX 3: Renegotiation — guard against mid-negotiation duplicate offers ─
+  // ── Renegotiation (fires when addTrack is called after stable state) ─────
   const handleNegoNeeded = useCallback(async () => {
-    if (peer.peer.signalingState !== "stable") {
-      console.log("Skipping negotiation — not stable:", peer.peer.signalingState);
-      return;
-    }
+    if (peer.peer.signalingState !== "stable") return;
     const offer = await peer.getOffer();
     socket.emit("peer:nego:needed", { offer, to: remoteSocketIdRef.current });
   }, [socket]);
 
   useEffect(() => {
     peer.peer.addEventListener("negotiationneeded", handleNegoNeeded);
-    return () => {
-      peer.peer.removeEventListener("negotiationneeded", handleNegoNeeded);
-    };
+    return () => peer.peer.removeEventListener("negotiationneeded", handleNegoNeeded);
   }, [handleNegoNeeded]);
 
   const handleNegoNeedIncomming = useCallback(
@@ -204,12 +190,11 @@ const RoomPage = () => {
       setRemoteEmail(null);
       setRemoteStream(null);
       setCallStatus("waiting");
-      remoteMediaStream.current = new MediaStream();
       peer.resetPeer();
     }
   }, []);
 
-  // ── Socket event bindings ─────────────────────────────────────────────────
+  // ── Socket bindings ───────────────────────────────────────────────────────
   useEffect(() => {
     socket.on("user:joined", handleUserJoined);
     socket.on("incomming:call", handleIncommingCall);
@@ -218,7 +203,6 @@ const RoomPage = () => {
     socket.on("peer:nego:final", handleNegoNeedFinal);
     socket.on("ice:candidate", handleRemoteIceCandidate);
     socket.on("user:left", handleUserLeft);
-
     return () => {
       socket.off("user:joined", handleUserJoined);
       socket.off("incomming:call", handleIncommingCall);
@@ -229,37 +213,25 @@ const RoomPage = () => {
       socket.off("user:left", handleUserLeft);
     };
   }, [
-    socket,
-    handleUserJoined,
-    handleIncommingCall,
-    handleCallAccepted,
-    handleNegoNeedIncomming,
-    handleNegoNeedFinal,
-    handleRemoteIceCandidate,
-    handleUserLeft,
+    socket, handleUserJoined, handleIncommingCall, handleCallAccepted,
+    handleNegoNeedIncomming, handleNegoNeedFinal, handleRemoteIceCandidate, handleUserLeft,
   ]);
 
   // ── Controls ──────────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
     if (!myStreamRef.current) return;
-    myStreamRef.current.getAudioTracks().forEach((t) => {
-      t.enabled = !t.enabled;
-    });
-    setIsMuted((prev) => !prev);
+    myStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; });
+    setIsMuted((p) => !p);
   }, []);
 
   const toggleCamera = useCallback(() => {
     if (!myStreamRef.current) return;
-    myStreamRef.current.getVideoTracks().forEach((t) => {
-      t.enabled = !t.enabled;
-    });
-    setIsCameraOff((prev) => !prev);
+    myStreamRef.current.getVideoTracks().forEach((t) => { t.enabled = !t.enabled; });
+    setIsCameraOff((p) => !p);
   }, []);
 
   const handleEndCall = useCallback(() => {
-    if (myStreamRef.current) {
-      myStreamRef.current.getTracks().forEach((t) => t.stop());
-    }
+    if (myStreamRef.current) myStreamRef.current.getTracks().forEach((t) => t.stop());
     peer.resetPeer();
     navigate("/");
   }, [navigate]);
@@ -268,13 +240,11 @@ const RoomPage = () => {
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
 
-      {/* Incoming call notification */}
+      {/* Incoming call modal */}
       {incomingCall && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 flex flex-col items-center gap-5 shadow-2xl">
-            <div className="w-16 h-16 rounded-full bg-indigo-600 flex items-center justify-center text-3xl animate-pulse">
-              📞
-            </div>
+            <div className="w-16 h-16 rounded-full bg-indigo-600 flex items-center justify-center text-3xl animate-pulse">📞</div>
             <p className="text-white font-semibold text-lg">Incoming call…</p>
             <p className="text-gray-400 text-sm">{remoteEmail || remoteSocketId}</p>
             <div className="flex gap-6 mt-2">
@@ -282,16 +252,12 @@ const RoomPage = () => {
                 onClick={handleDeclineCall}
                 className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white text-2xl flex items-center justify-center transition"
                 title="Decline"
-              >
-                📵
-              </button>
+              >📵</button>
               <button
                 onClick={handleAnswerCall}
                 className="w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 text-white text-2xl flex items-center justify-center transition"
                 title="Answer"
-              >
-                📞
-              </button>
+              >📞</button>
             </div>
           </div>
         </div>
@@ -307,10 +273,7 @@ const RoomPage = () => {
             {callStatus === "connected" && `Connected with ${remoteEmail || remoteSocketId}`}
           </span>
         </div>
-        <button
-          onClick={handleEndCall}
-          className="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-1.5 rounded-full transition"
-        >
+        <button onClick={handleEndCall} className="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-1.5 rounded-full transition">
           Leave Room
         </button>
       </header>
@@ -321,41 +284,22 @@ const RoomPage = () => {
         {/* Remote video */}
         <div className="relative bg-gray-900 rounded-2xl overflow-hidden flex items-center justify-center min-h-64">
           {remoteStream ? (
-            <ReactPlayer
-              playing
-              url={remoteStream}
-              width="100%"
-              height="100%"
-              style={{ objectFit: "cover" }}
-            />
+            <ReactPlayer playing url={remoteStream} width="100%" height="100%" style={{ objectFit: "cover" }} />
           ) : (
             <div className="flex flex-col items-center gap-3 text-gray-500">
               <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center text-3xl">👤</div>
-              <p className="text-sm">
-                {remoteEmail
-                  ? `Waiting for ${remoteEmail} to share video…`
-                  : "No one else is here yet"}
-              </p>
+              <p className="text-sm">{remoteEmail ? `Waiting for ${remoteEmail}…` : "No one else is here yet"}</p>
             </div>
           )}
           {remoteEmail && (
-            <span className="absolute bottom-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
-              {remoteEmail}
-            </span>
+            <span className="absolute bottom-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full">{remoteEmail}</span>
           )}
         </div>
 
         {/* My video */}
         <div className="relative bg-gray-900 rounded-2xl overflow-hidden flex items-center justify-center min-h-64">
           {myStream ? (
-            <ReactPlayer
-              playing
-              muted
-              url={myStream}
-              width="100%"
-              height="100%"
-              style={{ objectFit: "cover" }}
-            />
+            <ReactPlayer playing muted url={myStream} width="100%" height="100%" style={{ objectFit: "cover" }} />
           ) : (
             <div className="flex flex-col items-center gap-3 text-gray-500">
               <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center text-3xl">📷</div>
@@ -374,7 +318,7 @@ const RoomPage = () => {
       {/* Call controls */}
       <div className="flex flex-col items-center gap-4 pb-8">
 
-        {/* CALL button */}
+        {/* CALL button — shown when someone is in the room and call hasn't started */}
         {remoteSocketId && callStatus === "waiting" && (
           <button
             onClick={handleCallUser}
@@ -384,31 +328,28 @@ const RoomPage = () => {
           </button>
         )}
 
-        {/* Controls */}
+        {/* Mic / End / Camera controls */}
         {myStream && (
           <div className="flex items-center gap-6">
             <button
               onClick={toggleMute}
               title={isMuted ? "Unmute" : "Mute"}
-              className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition shadow-md
-                ${isMuted ? "bg-red-600 hover:bg-red-700" : "bg-gray-700 hover:bg-gray-600"} text-white`}
+              className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition shadow-md text-white
+                ${isMuted ? "bg-red-600 hover:bg-red-700" : "bg-gray-700 hover:bg-gray-600"}`}
             >
               {isMuted ? "🔇" : "🎤"}
             </button>
-
             <button
               onClick={handleEndCall}
-              title="End Call"
               className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white text-2xl flex items-center justify-center shadow-xl transition"
             >
               📵
             </button>
-
             <button
               onClick={toggleCamera}
               title={isCameraOff ? "Turn Camera On" : "Turn Camera Off"}
-              className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition shadow-md
-                ${isCameraOff ? "bg-red-600 hover:bg-red-700" : "bg-gray-700 hover:bg-gray-600"} text-white`}
+              className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition shadow-md text-white
+                ${isCameraOff ? "bg-red-600 hover:bg-red-700" : "bg-gray-700 hover:bg-gray-600"}`}
             >
               {isCameraOff ? "🚫" : "📷"}
             </button>
