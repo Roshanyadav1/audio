@@ -30,7 +30,7 @@ io.on("connection", (socket) => {
   console.log(`Socket Connected: ${socket.id}`);
 
   // ── Room Join ─────────────────────────────────────────────────────────────
-  socket.on("room:join", (data) => {
+  socket.on("room:join", async (data) => {
     const { email, room } = data;
     emailToSocketIdMap.set(email, socket.id);
     socketidToEmailMap.set(socket.id, email);
@@ -39,6 +39,18 @@ io.on("connection", (socket) => {
     io.to(room).emit("user:joined", { email, id: socket.id });
 
     socket.join(room);
+
+    // Also notify the NEW joiner about people already in the room
+    // so they can see the CALL button too
+    const socketsInRoom = await io.in(room).fetchSockets();
+    for (const s of socketsInRoom) {
+      if (s.id !== socket.id) {
+        const existingEmail = socketidToEmailMap.get(s.id);
+        if (existingEmail) {
+          socket.emit("user:joined", { email: existingEmail, id: s.id });
+        }
+      }
+    }
 
     // Confirm join to the joining user
     io.to(socket.id).emit("room:join", data);
