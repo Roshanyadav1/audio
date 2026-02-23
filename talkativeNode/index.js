@@ -9,10 +9,7 @@ const port = process.env.PORT || 4000;
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-  },
+  cors: true,
 });
 
 // Welcome API endpoint
