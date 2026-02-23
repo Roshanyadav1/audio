@@ -2,11 +2,12 @@ import React, { useEffect, useCallback, useState, useRef } from "react";
 import ReactPlayer from "react-player";
 import peer from "../service/peer";
 import { useSocket } from "../context/SocketProvider";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 const RoomPage = () => {
   const socket = useSocket();
   const navigate = useNavigate();
+  const { roomId } = useParams();
 
   const [remoteSocketId, setRemoteSocketId] = useState(null);
   const [remoteEmail, setRemoteEmail] = useState(null);
@@ -16,19 +17,31 @@ const RoomPage = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
 
-  const myStreamRef = useRef(null); // keep latest stream in ref for cleanup
+  const myStreamRef = useRef(null);
+  const remoteSocketIdRef = useRef(null);
+  // Accumulate remote tracks into a single MediaStream
+  const remoteMediaStream = useRef(new MediaStream());
 
-  // ── On mount: reset peer so there's a fresh RTCPeerConnection ────────────
+  // ── On mount: reset peer, attach core listeners ───────────────────────────
   useEffect(() => {
     peer.resetPeer();
 
-    // Listen for remote tracks
-    peer.peer.addEventListener("track", (ev) => {
-      setRemoteStream(ev.streams[0]);
+    // FIX 2: Accumulate tracks robustly into a MediaStream
+    const handleTrack = (ev) => {
+      const stream = ev.streams?.[0];
+      if (stream) {
+        setRemoteStream(stream);
+      } else {
+        // ev.streams can be empty — manually add track
+        remoteMediaStream.current.addTrack(ev.track);
+        setRemoteStream(remoteMediaStream.current);
+      }
       setCallStatus("connected");
-    });
+    };
 
-    // ICE candidate: send to the other peer via server
+    peer.peer.addEventListener("track", handleTrack);
+
+    // ICE candidate → relay through server
     peer.onIceCandidate((candidate) => {
       if (remoteSocketIdRef.current) {
         socket.emit("ice:candidate", {
@@ -39,7 +52,7 @@ const RoomPage = () => {
     });
 
     return () => {
-      // Stop all local tracks on unmount
+      peer.peer.removeEventListener("track", handleTrack);
       if (myStreamRef.current) {
         myStreamRef.current.getTracks().forEach((t) => t.stop());
       }
@@ -48,11 +61,25 @@ const RoomPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep a ref to remoteSocketId so ICE cb (registered once) can always see latest
-  const remoteSocketIdRef = useRef(null);
+  // Sync ref with state
   useEffect(() => {
     remoteSocketIdRef.current = remoteSocketId;
   }, [remoteSocketId]);
+
+  // ── FIX 4: Auto-rejoin room on socket reconnect (handles page refresh) ────
+  useEffect(() => {
+    const handleReconnect = () => {
+      const email = sessionStorage.getItem("talkative_email");
+      if (email && roomId) {
+        console.log("Reconnecting to room:", roomId, "as", email);
+        socket.emit("room:join", { email, room: roomId });
+      }
+    };
+    socket.on("connect", handleReconnect);
+    return () => {
+      socket.off("connect", handleReconnect);
+    };
+  }, [socket, roomId]);
 
   // ── Get local media ───────────────────────────────────────────────────────
   const getLocalStream = useCallback(async () => {
@@ -65,27 +92,24 @@ const RoomPage = () => {
       setMyStream(stream);
       return stream;
     } catch (err) {
-      console.error("Could not get media devices:", err);
-      alert("Camera/Microphone access is required for the call.");
+      console.error("Could not get media:", err);
+      alert("Camera/Microphone access is required.");
       return null;
     }
   }, []);
 
-  // ── Add local tracks to peer connection ──────────────────────────────────
-  const sendStreams = useCallback(
-    (stream) => {
-      const src = stream || myStream;
-      if (!src) return;
-      const senders = peer.peer.getSenders();
-      src.getTracks().forEach((track) => {
-        const alreadyAdded = senders.find((s) => s.track === track);
-        if (!alreadyAdded) {
-          peer.peer.addTrack(track, src);
-        }
-      });
-    },
-    [myStream]
-  );
+  // ── Add local tracks to peer (guard against duplicates) ───────────────────
+  const sendStreams = useCallback((stream) => {
+    const src = stream || myStreamRef.current;
+    if (!src) return;
+    const senders = peer.peer.getSenders();
+    src.getTracks().forEach((track) => {
+      const alreadyAdded = senders.find((s) => s.track === track);
+      if (!alreadyAdded) {
+        peer.peer.addTrack(track, src);
+      }
+    });
+  }, []);
 
   // ── Another user joined the room ─────────────────────────────────────────
   const handleUserJoined = useCallback(({ email, id }) => {
@@ -94,43 +118,43 @@ const RoomPage = () => {
     setRemoteEmail(email);
   }, []);
 
-  // ── Initiate a call ───────────────────────────────────────────────────────
+  // ── Initiate call ────────────────────────────────────────────────────────
   const handleCallUser = useCallback(async () => {
     const stream = await getLocalStream();
     if (!stream) return;
-    sendStreams(stream);
+    sendStreams(stream);           // Add tracks before offer → SDP has sendrecv
     const offer = await peer.getOffer();
-    socket.emit("user:call", { to: remoteSocketId, offer });
+    socket.emit("user:call", { to: remoteSocketIdRef.current, offer });
     setCallStatus("calling");
-  }, [remoteSocketId, socket, getLocalStream, sendStreams]);
+  }, [socket, getLocalStream, sendStreams]);
 
-  // ── Receive incoming call ─────────────────────────────────────────────────
+  // ── FIX 1: Receive incoming call — tracks added BEFORE getAnswer() ────────
   const handleIncommingCall = useCallback(
     async ({ from, offer }) => {
       setRemoteSocketId(from);
       const stream = await getLocalStream();
       if (!stream) return;
-      console.log("Incoming call from", from);
-      const ans = await peer.getAnswer(offer);
-      sendStreams(stream);
+      sendStreams(stream);                          // ← Add tracks FIRST
+      const ans = await peer.getAnswer(offer);     // ← Now SDP will be sendrecv
       socket.emit("call:accepted", { to: from, ans });
       setCallStatus("connected");
     },
     [socket, getLocalStream, sendStreams]
   );
 
-  // ── Call accepted by remote ───────────────────────────────────────────────
-  const handleCallAccepted = useCallback(
-    async ({ ans }) => {
-      await peer.setRemoteDescription(ans);
-      console.log("Call accepted!");
-      setCallStatus("connected");
-    },
-    []
-  );
+  // ── Call accepted ─────────────────────────────────────────────────────────
+  const handleCallAccepted = useCallback(async ({ ans }) => {
+    await peer.setRemoteDescription(ans);
+    console.log("Call accepted!");
+    setCallStatus("connected");
+  }, []);
 
-  // ── Renegotiation ─────────────────────────────────────────────────────────
+  // ── FIX 3: Renegotiation — guard against mid-negotiation duplicate offers ─
   const handleNegoNeeded = useCallback(async () => {
+    if (peer.peer.signalingState !== "stable") {
+      console.log("Skipping negotiation — not stable:", peer.peer.signalingState);
+      return;
+    }
     const offer = await peer.getOffer();
     socket.emit("peer:nego:needed", { offer, to: remoteSocketIdRef.current });
   }, [socket]);
@@ -160,18 +184,16 @@ const RoomPage = () => {
   }, []);
 
   // ── Remote user left ──────────────────────────────────────────────────────
-  const handleUserLeft = useCallback(
-    ({ id }) => {
-      if (id === remoteSocketIdRef.current) {
-        setRemoteSocketId(null);
-        setRemoteEmail(null);
-        setRemoteStream(null);
-        setCallStatus("waiting");
-        peer.resetPeer();
-      }
-    },
-    []
-  );
+  const handleUserLeft = useCallback(({ id }) => {
+    if (id === remoteSocketIdRef.current) {
+      setRemoteSocketId(null);
+      setRemoteEmail(null);
+      setRemoteStream(null);
+      setCallStatus("waiting");
+      remoteMediaStream.current = new MediaStream();
+      peer.resetPeer();
+    }
+  }, []);
 
   // ── Socket event bindings ─────────────────────────────────────────────────
   useEffect(() => {
@@ -205,20 +227,20 @@ const RoomPage = () => {
 
   // ── Controls ──────────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
-    if (!myStream) return;
-    myStream.getAudioTracks().forEach((t) => {
+    if (!myStreamRef.current) return;
+    myStreamRef.current.getAudioTracks().forEach((t) => {
       t.enabled = !t.enabled;
     });
     setIsMuted((prev) => !prev);
-  }, [myStream]);
+  }, []);
 
   const toggleCamera = useCallback(() => {
-    if (!myStream) return;
-    myStream.getVideoTracks().forEach((t) => {
+    if (!myStreamRef.current) return;
+    myStreamRef.current.getVideoTracks().forEach((t) => {
       t.enabled = !t.enabled;
     });
     setIsCameraOff((prev) => !prev);
-  }, [myStream]);
+  }, []);
 
   const handleEndCall = useCallback(() => {
     if (myStreamRef.current) {
@@ -235,7 +257,7 @@ const RoomPage = () => {
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-800">
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+          <span className={`w-2 h-2 rounded-full ${callStatus === "connected" ? "bg-green-400 animate-pulse" : "bg-yellow-400 animate-pulse"}`}></span>
           <span className="text-gray-300 text-sm font-medium">
             {callStatus === "waiting" && "Waiting for someone to join…"}
             {callStatus === "calling" && "Calling…"}
@@ -265,9 +287,7 @@ const RoomPage = () => {
             />
           ) : (
             <div className="flex flex-col items-center gap-3 text-gray-500">
-              <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center text-3xl">
-                👤
-              </div>
+              <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center text-3xl">👤</div>
               <p className="text-sm">
                 {remoteEmail
                   ? `Waiting for ${remoteEmail} to share video…`
@@ -295,27 +315,23 @@ const RoomPage = () => {
             />
           ) : (
             <div className="flex flex-col items-center gap-3 text-gray-500">
-              <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center text-3xl">
-                📷
-              </div>
+              <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center text-3xl">📷</div>
               <p className="text-sm">Your camera is off</p>
             </div>
           )}
-          <span className="absolute bottom-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
-            You
-          </span>
-          {isCameraOff && (
-            <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center">
+          <span className="absolute bottom-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full">You</span>
+          {isCameraOff && myStream && (
+            <div className="absolute inset-0 bg-gray-900/90 flex items-center justify-center">
               <span className="text-white text-sm">Camera Off</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Call action area */}
+      {/* Call controls */}
       <div className="flex flex-col items-center gap-4 pb-8">
 
-        {/* CALL button — shown when someone else is in the room but not yet called */}
+        {/* CALL button */}
         {remoteSocketId && callStatus === "waiting" && (
           <button
             onClick={handleCallUser}
@@ -325,13 +341,13 @@ const RoomPage = () => {
           </button>
         )}
 
-        {/* Controls — shown when camera is active */}
+        {/* Controls */}
         {myStream && (
           <div className="flex items-center gap-6">
             <button
               onClick={toggleMute}
               title={isMuted ? "Unmute" : "Mute"}
-              className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold transition shadow-md
+              className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition shadow-md
                 ${isMuted ? "bg-red-600 hover:bg-red-700" : "bg-gray-700 hover:bg-gray-600"} text-white`}
             >
               {isMuted ? "🔇" : "🎤"}
@@ -348,7 +364,7 @@ const RoomPage = () => {
             <button
               onClick={toggleCamera}
               title={isCameraOff ? "Turn Camera On" : "Turn Camera Off"}
-              className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold transition shadow-md
+              className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition shadow-md
                 ${isCameraOff ? "bg-red-600 hover:bg-red-700" : "bg-gray-700 hover:bg-gray-600"} text-white`}
             >
               {isCameraOff ? "🚫" : "📷"}

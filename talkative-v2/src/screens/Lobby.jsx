@@ -11,6 +11,8 @@ const LobbyScreen = () => {
   const handleSubmitForm = useCallback(
     (e) => {
       e.preventDefault();
+      // FIX 4: Persist email so Room.jsx can rejoin after a page refresh
+      sessionStorage.setItem("talkative_email", email);
       socket.emit("room:join", { email, room });
     },
     [email, room, socket]
