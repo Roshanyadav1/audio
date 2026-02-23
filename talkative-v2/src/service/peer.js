@@ -6,7 +6,11 @@ class PeerService {
   }
 
   _initPeer() {
+    // Close old connection cleanly
     if (this.peer) {
+      this.peer.onicecandidate = null;
+      this.peer.ontrack = null;
+      this.peer.onnegotiationneeded = null;
       this.peer.close();
     }
 
@@ -21,7 +25,7 @@ class PeerService {
       ],
     });
 
-    // Forward ICE candidates to whoever is listening
+    // Relay local ICE candidates
     this.peer.addEventListener("icecandidate", (event) => {
       if (event.candidate && this._iceCandidateCallback) {
         this._iceCandidateCallback(event.candidate);
@@ -29,48 +33,44 @@ class PeerService {
     });
   }
 
-  // Called when entering a room — ensures a fresh peer
   resetPeer() {
+    this._iceCandidateCallback = null;
     this._initPeer();
   }
 
-  // Register a callback to receive local ICE candidates
   onIceCandidate(callback) {
     this._iceCandidateCallback = callback;
   }
 
-  // Add a remote ICE candidate received from signaling server
   async addIceCandidate(candidate) {
     if (this.peer && candidate) {
       try {
         await this.peer.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (e) {
-        console.error("Error adding ICE candidate:", e);
+        // Ignore benign ICE errors (e.g. candidate added after end-of-candidates)
+        console.warn("ICE candidate warning:", e.message);
       }
     }
   }
 
+  async getOffer() {
+    if (!this.peer) return null;
+    const offer = await this.peer.createOffer();
+    await this.peer.setLocalDescription(new RTCSessionDescription(offer));
+    return offer;
+  }
+
   async getAnswer(offer) {
-    if (this.peer) {
-      await this.peer.setRemoteDescription(new RTCSessionDescription(offer));
-      const ans = await this.peer.createAnswer();
-      await this.peer.setLocalDescription(new RTCSessionDescription(ans));
-      return ans;
-    }
+    if (!this.peer) return null;
+    await this.peer.setRemoteDescription(new RTCSessionDescription(offer));
+    const ans = await this.peer.createAnswer();
+    await this.peer.setLocalDescription(new RTCSessionDescription(ans));
+    return ans;
   }
 
   async setRemoteDescription(ans) {
-    if (this.peer) {
-      await this.peer.setRemoteDescription(new RTCSessionDescription(ans));
-    }
-  }
-
-  async getOffer() {
-    if (this.peer) {
-      const offer = await this.peer.createOffer();
-      await this.peer.setLocalDescription(new RTCSessionDescription(offer));
-      return offer;
-    }
+    if (!this.peer) return;
+    await this.peer.setRemoteDescription(new RTCSessionDescription(ans));
   }
 }
 
