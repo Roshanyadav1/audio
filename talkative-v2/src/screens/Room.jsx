@@ -16,6 +16,7 @@ const RoomPage = () => {
   const [callStatus, setCallStatus] = useState("waiting"); // waiting | calling | connected
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null); // { from, offer }
 
   const myStreamRef = useRef(null);
   const remoteSocketIdRef = useRef(null);
@@ -128,19 +129,32 @@ const RoomPage = () => {
     setCallStatus("calling");
   }, [socket, getLocalStream, sendStreams]);
 
-  // ── FIX 1: Receive incoming call — tracks added BEFORE getAnswer() ────────
+  // ── FIX 1: Receive incoming call — store it, show Answer UI (don't auto-answer)
   const handleIncommingCall = useCallback(
     async ({ from, offer }) => {
       setRemoteSocketId(from);
-      const stream = await getLocalStream();
-      if (!stream) return;
-      sendStreams(stream);                          // ← Add tracks FIRST
-      const ans = await peer.getAnswer(offer);     // ← Now SDP will be sendrecv
-      socket.emit("call:accepted", { to: from, ans });
-      setCallStatus("connected");
+      setIncomingCall({ from, offer }); // Show Answer button to user
     },
-    [socket, getLocalStream, sendStreams]
+    []
   );
+
+  // ── Answer the stored incoming call ─────────────
+  const handleAnswerCall = useCallback(async () => {
+    if (!incomingCall) return;
+    const { from, offer } = incomingCall;
+    setIncomingCall(null);
+    const stream = await getLocalStream();
+    if (!stream) return;
+    sendStreams(stream);                        // ← tracks added BEFORE answer
+    const ans = await peer.getAnswer(offer);
+    socket.emit("call:accepted", { to: from, ans });
+    setCallStatus("connected");
+  }, [incomingCall, socket, getLocalStream, sendStreams]);
+
+  const handleDeclineCall = useCallback(() => {
+    setIncomingCall(null);
+    setRemoteSocketId(null);
+  }, []);
 
   // ── Call accepted ─────────────────────────────────────────────────────────
   const handleCallAccepted = useCallback(async ({ ans }) => {
@@ -253,6 +267,35 @@ const RoomPage = () => {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
+
+      {/* Incoming call notification */}
+      {incomingCall && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 flex flex-col items-center gap-5 shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-indigo-600 flex items-center justify-center text-3xl animate-pulse">
+              📞
+            </div>
+            <p className="text-white font-semibold text-lg">Incoming call…</p>
+            <p className="text-gray-400 text-sm">{remoteEmail || remoteSocketId}</p>
+            <div className="flex gap-6 mt-2">
+              <button
+                onClick={handleDeclineCall}
+                className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white text-2xl flex items-center justify-center transition"
+                title="Decline"
+              >
+                📵
+              </button>
+              <button
+                onClick={handleAnswerCall}
+                className="w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 text-white text-2xl flex items-center justify-center transition"
+                title="Answer"
+              >
+                📞
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-800">
